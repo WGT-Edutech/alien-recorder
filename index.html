@@ -177,6 +177,10 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
 #scopeCanvas,#spectrumCanvas{width:100%;height:64px;background:rgba(5,8,16,.7);border-radius:8px;border:1px solid rgba(30,58,95,.4);display:block}
 .monitor-meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px;font-size:1.05rem;color:var(--text-muted)}
 .monitor-meta span b{color:var(--cyan);font-weight:700}
+.inst-transport{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;justify-content:center}
+.inst-time{font-family:'Orbitron';font-size:1.6rem;color:var(--cyan);min-width:190px;text-align:center;text-shadow:0 0 8px rgba(34,211,238,.4)}
+.inst-markers{font-size:1.2rem;color:var(--amber);min-width:150px;text-align:center}
+#instCanvas{width:100%;height:130px;background:rgba(5,8,16,.7);border-radius:12px;border:1px solid rgba(30,58,95,.4);cursor:pointer;display:block}
 .instruct{color:#5eb433;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 8px rgba(0,0,0,.45)}
 
 /* ═══ RESPONSIVE ═══ */
@@ -287,6 +291,22 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
     </div>
     <p class="instruct" style="font-size:1.1rem;text-align:center;margin-top:6px">Vocal Sync: + pushes the vocal later, − earlier vs the instrumental. Use to lock the voice to a tab-captured track.</p>
     <p class="instruct" style="font-size:1.9rem;text-align:center;margin-top:8px">Stems record clean (pre-FX). Adjust sends &amp; volumes after recording, then hit Bounce to render the final mix.</p>
+  </section>
+
+  <!-- INSTRUMENTAL TRANSPORT -->
+  <section class="card">
+    <div class="section-title">Instrumental · Transport</div>
+    <canvas id="instCanvas" width="900" height="130"></canvas>
+    <div class="inst-transport">
+      <button class="btn" id="instStopBtn"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg> Stop</button>
+      <button class="btn btn-big success" id="instPlayBtn"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg> Play</button>
+      <span class="inst-time" id="instTime">0:00 / 0:00</span>
+      <button class="btn" id="instInBtn">Set In</button>
+      <button class="btn" id="instOutBtn">Set Out</button>
+      <button class="btn btn-sm" id="instClearBtn">Clear</button>
+      <span class="inst-markers" id="instMarkers">No markers</span>
+    </div>
+    <p class="instruct" style="font-size:1.1rem;text-align:center;margin-top:8px">Click the waveform to seek. Set In &amp; Out, then play and record — the mic punches in between the markers.</p>
   </section>
 
   <!-- STEMS -->
@@ -422,11 +442,12 @@ function makeBaseSource(name,kind){
   s.vol=70; s.panVal=0;
   s.sends={reverb:0,delay:0};
   s.monGain=audioCtx.createGain(); s.monGain.gain.value=1;
+  s.punchGain=audioCtx.createGain(); s.punchGain.gain.value=1;
   // monitor (min-latency dry): phase -> gain -> pan -> monGain -> master. NO FX live.
   s.phaseGain.connect(s.gain); s.gain.connect(s.pan); s.pan.connect(s.monGain); s.monGain.connect(masterGain);
-  // dry record tap (pre-fader) — unaffected by monitor off
+  // dry record tap (pre-fader) via punch gate — mic punches in/out here
   s.recDest=audioCtx.createMediaStreamDestination();
-  s.phaseGain.connect(s.recDest);
+  s.phaseGain.connect(s.punchGain); s.punchGain.connect(s.recDest);
   return s;
 }
 function setupStreamSource(name,kind,stream){
@@ -440,12 +461,14 @@ function setupStreamSource(name,kind,stream){
 }
 function setupBufferSource(name,kind,buffer){
   var s=makeBaseSource(name,kind);
-  var src=audioCtx.createBufferSource(); src.buffer=buffer; src.loop=true;
-  s.node=src; src.connect(s.inGain); s.inGain.connect(s.phaseGain);
-  if(name==='mic') s.inGain.gain.value=micGain;
-  src.start();
+  instBuffer=buffer;
+  s.inGain.gain.value=1;
+  s.node=null;
   s.stream=null;
   sources[name]=s;
+  instStop();
+  drawInstWave();
+  instPlay();
   return s;
 }
 function handleInstFile(file){
@@ -731,6 +754,7 @@ function startRecording(){
   var names=activeSources();
   if(!names.length){ alert('Connect at least one source first.'); return; }
   stopPlayback();
+  armPunch();
   recorders={}; recChunks={};
   names.forEach(function(name){
     var s=sourceOf(name); if(!s||!s.recDest) return;
@@ -746,6 +770,7 @@ function startRecording(){
   recInterval=setInterval(updateRecTime,250);
 }
 function stopRecording(){
+  disarmPunch();
   Object.keys(recorders).forEach(function(name){
     var mr=recorders[name];
     if(mr&&mr.state!=='inactive') mr.stop();
@@ -1065,6 +1090,114 @@ function stopTheremin(){
   thereminOsc=null; thereminGain=null;
 }
 
+// ══════════ INSTRUMENTAL TRANSPORT ══════════
+var instBuffer=null, instPos=0, instPlaying=false, instSource=null, instStartTime=0, instStartPos=0, instIn=-1, instOut=-1;
+function instPlay(){
+  if(!instBuffer) return;
+  var s=sourceOf('comp'); if(!s) return;
+  ensureAudio();
+  if(instPlaying) return;
+  var src=audioCtx.createBufferSource(); src.buffer=instBuffer;
+  src.connect(s.inGain);
+  src.start(0, Math.min(instPos, instBuffer.duration));
+  s.node=src; instSource=src; instPlaying=true;
+  instStartTime=audioCtx.currentTime; instStartPos=instPos;
+  instTick();
+}
+function instPause(){
+  if(!instPlaying) return;
+  instPos=instStartPos+(audioCtx.currentTime-instStartTime);
+  if(instPos>=instBuffer.duration) instPos=instBuffer.duration;
+  stopInstSource(); instPlaying=false;
+  drawInstWave(); updateInstTime();
+}
+function instStop(){
+  stopInstSource(); instPlaying=false; instPos=0;
+  drawInstWave(); updateInstTime();
+}
+function stopInstSource(){
+  if(instSource){ try{instSource.stop();}catch(e){} try{instSource.disconnect();}catch(e){} }
+  instSource=null;
+}
+function instTick(){
+  if(!instPlaying) return;
+  instPos=instStartPos+(audioCtx.currentTime-instStartTime);
+  if(instPos>=instBuffer.duration){
+    instPos=instBuffer.duration; stopInstSource(); instPlaying=false;
+    document.getElementById('instPlayBtn').innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg> Play';
+  }
+  drawInstWave(); updateInstTime();
+  requestAnimationFrame(instTick);
+}
+function instSeek(t){
+  if(!instBuffer) return;
+  var was=instPlaying;
+  if(was) instPause();
+  instPos=Math.max(0,Math.min(t,instBuffer.duration));
+  drawInstWave(); updateInstTime();
+  if(was) instPlay();
+}
+function toggleInstPlay(){
+  if(!instBuffer) return;
+  ensureAudio();
+  if(instPlaying){ instPause(); document.getElementById('instPlayBtn').innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg> Play'; }
+  else{ instPlay(); document.getElementById('instPlayBtn').innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg> Pause'; }
+}
+function setInstIn(){ instIn=instPos; drawInstWave(); updateMarkersLabel(); }
+function setInstOut(){ instOut=instPos; drawInstWave(); updateMarkersLabel(); }
+function clearInstMarkers(){ instIn=-1; instOut=-1; drawInstWave(); updateMarkersLabel(); }
+function updateMarkersLabel(){
+  var el=document.getElementById('instMarkers'); if(!el) return;
+  var p=[];
+  if(instIn>=0) p.push('In '+fmt(instIn));
+  if(instOut>=0) p.push('Out '+fmt(instOut));
+  el.textContent=p.length?p.join(' · '):'No markers';
+}
+function updateInstTime(){
+  var el=document.getElementById('instTime'); if(!el||!instBuffer) return;
+  el.textContent=fmt(instPos)+' / '+fmt(instBuffer.duration);
+}
+function drawInstWave(){
+  var cv=document.getElementById('instCanvas'); if(!cv) return;
+  var ctx=cv.getContext('2d');
+  var w=cv.width, h=cv.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='rgba(5,8,16,.7)'; ctx.fillRect(0,0,w,h);
+  if(instBuffer){
+    var dur=instBuffer.duration, data=instBuffer.getChannelData(0), step=Math.floor(data.length/w);
+    ctx.strokeStyle='#22d3ee'; ctx.beginPath();
+    for(var x=0;x<w;x++){
+      var st=x*step, en=Math.min(st+step,data.length), mn=0,mx=0;
+      for(var i=st;i<en;i++){ var v=data[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+      ctx.moveTo(x,h/2-mx*(h/2-3)); ctx.lineTo(x,h/2-mn*(h/2-3));
+    }
+    ctx.stroke();
+    if(instIn>=0){ var ix=instIn/dur*w; ctx.fillStyle='#34d399'; ctx.fillRect(ix,0,2,h); }
+    if(instOut>=0){ var ox=instOut/dur*w; ctx.fillStyle='#fb7185'; ctx.fillRect(ox,0,2,h); }
+    var px=instPos/dur*w;
+    ctx.fillStyle='#fff'; ctx.fillRect(px-1,0,2,h);
+  }
+}
+// Punch in/out: gate the mic's record tap to [In, Out] while the instrumental plays.
+function armPunch(){
+  var s=sourceOf('mic'); if(!s||!s.punchGain) return;
+  var pg=s.punchGain.gain;
+  pg.cancelScheduledValues(audioCtx.currentTime);
+  if(instIn>=0 && instOut>instIn && instBuffer){
+    var now=audioCtx.currentTime;
+    var tIn=now+Math.max(0,instIn-instPos);
+    var tOut=now+Math.max(0,instOut-instPos);
+    pg.setValueAtTime(0,now);
+    pg.setValueAtTime(1,tIn);
+    pg.setValueAtTime(0,tOut);
+  } else {
+    pg.setValueAtTime(1,now);
+  }
+}
+function disarmPunch(){
+  var s=sourceOf('mic'); if(s&&s.punchGain) s.punchGain.gain.setValueAtTime(1,audioCtx.currentTime);
+}
+
 // ══════════ WIRING ══════════
 function wire(){
   bindFX();
@@ -1085,6 +1218,16 @@ function wire(){
   document.getElementById('bounceBtn').addEventListener('click',bounce);
   document.getElementById('speedFader').addEventListener('input',function(){ setSpeed(this.value); });
   document.getElementById('syncFader').addEventListener('input',function(){ setSync(this.value); });
+  document.getElementById('instPlayBtn').addEventListener('click',toggleInstPlay);
+  document.getElementById('instStopBtn').addEventListener('click',instStop);
+  document.getElementById('instInBtn').addEventListener('click',setInstIn);
+  document.getElementById('instOutBtn').addEventListener('click',setInstOut);
+  document.getElementById('instClearBtn').addEventListener('click',clearInstMarkers);
+  document.getElementById('instCanvas').addEventListener('click',function(e){
+    var r=this.getBoundingClientRect();
+    var frac=(e.clientX-r.left)/r.width;
+    if(instBuffer) instSeek(frac*instBuffer.duration);
+  });
   document.getElementById('alienBtn').addEventListener('click',toggleTheremin);
   document.addEventListener('keydown',function(e){
     if(e.code==='Space'&&!e.repeat&&!/INPUT|BUTTON/.test(document.activeElement.tagName)){ e.preventDefault(); document.getElementById('recBtn').click(); }
