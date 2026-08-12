@@ -273,6 +273,11 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
       <div class="fader-label"><span>Playback Speed</span><b id="speedVal">1.0x</b></div>
       <input type="range" class="fader cyan" id="speedFader" min="25" max="400" value="100">
     </div>
+    <div class="fader-wrap" style="max-width:320px;margin:10px auto 0">
+      <div class="fader-label"><span>Vocal Sync (ms)</span><b id="syncVal" style="color:var(--amber)">0</b></div>
+      <input type="range" class="fader acid" id="syncFader" min="-150" max="150" value="0">
+    </div>
+    <p class="instruct" style="font-size:1.1rem;text-align:center;margin-top:6px">Vocal Sync: + pushes the vocal later, − earlier vs the instrumental. Use to lock the voice to a tab-captured track.</p>
     <p class="instruct" style="font-size:1.9rem;text-align:center;margin-top:8px">Stems record clean (pre-FX). Adjust sends &amp; volumes after recording, then hit Bounce to render the final mix.</p>
   </section>
 
@@ -311,6 +316,7 @@ var returns={};        // {reverb:{...}, delay:{...}} live
 var retParams={ reverb:{level:0.5,decay:2}, delay:{level:0.5,time:0.37,feedback:0.4} };
 var sidechain={enabled:false,amount:0.6,attack:0.01,release:0.2};
 var micGain=2;
+var syncOffset=0;
 var stems={};          // name -> {buffer, name}
 var stemMix={};        // name -> {vol, pan, sends:{reverb,delay}}
 var recorders={}, recChunks={};
@@ -805,7 +811,7 @@ function togglePlay(){
     var sgD=audioCtx.createGain(); sgD.gain.value=(mix.muted?0:mix.sends.delay||0)/100;
     p.connect(sgD); sgD.connect(returns.delay.input);
     playCtl[name]={gain:g,pan:p,sends:{reverb:sgR,delay:sgD}};
-    src.start(start); playNodes.push(src);
+    src.start(syncStart(name,start)); playNodes.push(src);
     duration=Math.max(duration,stem.buffer.duration);
   });
   isPlaying=true;
@@ -822,6 +828,14 @@ function setSpeed(val){
   speedVal=val/100;
   document.getElementById('speedVal').textContent=speedVal.toFixed(1)+'x';
 }
+function setSync(val){
+  syncOffset=parseInt(val)||0;
+  document.getElementById('syncVal').textContent=syncOffset;
+}
+// Shift the vocal (mic) stem vs the instrumental. + = vocal later, − = vocal earlier.
+function syncStart(name,base){
+  return base + (name==='mic' ? (syncOffset>0?syncOffset/1000:0) : (syncOffset<0?-syncOffset/1000:0));
+}
 
 // ══════════ MIXDOWN ══════════
 function bounce(){
@@ -830,7 +844,7 @@ function bounce(){
   ensureAudio();
   var sr=audioCtx.sampleRate, duration=0;
   names.forEach(function(n){ duration=Math.max(duration,stems[n].buffer.duration); });
-  duration+=2.0; // reverb tail headroom
+  duration+=2.0+Math.abs(syncOffset)/1000; // reverb tail + sync headroom
   var offline=new OfflineAudioContext(2,Math.ceil(duration*sr),sr);
   var master=offline.createGain(); master.gain.value=0.95;
   var comp=offline.createDynamicsCompressor();
@@ -859,7 +873,7 @@ function bounce(){
       var sg=offline.createGain(); sg.gain.value=(mix.muted?0:mix.sends[rt]||0)/100;
       p.connect(sg); sg.connect(offRet[rt].input);
     });
-    src.start(0);
+    src.start(syncStart(name,0));
   });
   var btn=document.getElementById('bounceBtn');
   btn.disabled=true; btn.innerHTML=ICONS.dl+' Rendering…';
@@ -1033,6 +1047,7 @@ function wire(){
   document.getElementById('playBtn').addEventListener('click',togglePlay);
   document.getElementById('bounceBtn').addEventListener('click',bounce);
   document.getElementById('speedFader').addEventListener('input',function(){ setSpeed(this.value); });
+  document.getElementById('syncFader').addEventListener('input',function(){ setSync(this.value); });
   document.getElementById('alienBtn').addEventListener('click',toggleTheremin);
   document.addEventListener('keydown',function(e){
     if(e.code==='Space'&&!e.repeat&&!/INPUT|BUTTON/.test(document.activeElement.tagName)){ e.preventDefault(); document.getElementById('recBtn').click(); }
