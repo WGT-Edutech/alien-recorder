@@ -201,16 +201,16 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
       <svg class="icon" style="color:var(--cyan)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></svg>
       <div class="source-name">Mic<span class="status" id="micStatus">inactive</span></div>
       <div class="source-controls">
-        <div class="mic-source">
-          <button class="btn" id="micBtn">Connect Mic</button>
-          <select class="mic-select" id="micSelect" title="Choose microphone"></select>
-        </div>
-        <button class="btn btn-sm" id="micMonBtn" disabled>Monitor</button>
         <div class="vfader">
           <label>Mic Gain</label>
           <input type="range" class="vf cyan" id="micGainFader" min="100" max="600" value="200">
           <span class="vval" id="micGainVal">2.0x</span>
         </div>
+        <div class="mic-source">
+          <button class="btn" id="micBtn">Connect Mic</button>
+          <select class="mic-select" id="micSelect" title="Choose microphone"></select>
+        </div>
+        <button class="btn btn-sm" id="micMonBtn" disabled>Monitor</button>
       </div>
     </div>
     <div class="source-row">
