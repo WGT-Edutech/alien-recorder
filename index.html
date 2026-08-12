@@ -96,6 +96,10 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
 .mic-source .mic-select{width:100%;max-width:none}
 .mic-select:focus{outline:none;border-color:var(--cyan);box-shadow:var(--glow-cyan)}
 .mic-select option{background:#0a0e1a;color:var(--text)}
+.drop-zone{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 18px;border:2px dashed rgba(34,211,238,.4);border-radius:14px;background:rgba(34,211,238,.06);cursor:pointer;text-align:center;min-width:260px;transition:all .15s}
+.drop-zone span{font-size:1.1rem;color:var(--text-muted)}
+.drop-zone.over{border-color:var(--acid);background:rgba(182,245,66,.12);box-shadow:var(--glow-acid)}
+.drop-zone .drop-btn{font-size:1.3rem;padding:14px 26px}
 
 /* ═══ FADERS / SLIDERS ═══ */
 .fader{-webkit-appearance:none;appearance:none;width:100%;height:6px;background:linear-gradient(90deg,rgba(30,58,95,.4),rgba(167,139,250,.15));border-radius:3px;outline:none;border:1px solid rgba(30,58,95,.3)}
@@ -217,7 +221,10 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
       <svg class="icon" style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
       <div class="source-name">Instrumental<span class="status" id="compStatus">inactive</span></div>
       <div class="source-controls">
-        <label class="btn" style="position:relative;overflow:hidden;cursor:pointer">Upload<input type="file" id="instFileInput" accept="audio/*,video/*" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
+        <div class="drop-zone" id="instDrop">
+          <span>Drag &amp; drop instrumental here, or</span>
+          <label class="btn drop-btn" style="position:relative;overflow:hidden;cursor:pointer">Upload<input type="file" id="instFileInput" accept="audio/*,video/*" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
+        </div>
         <button class="btn" id="compBtn">Capture Tab Audio</button>
         <button class="btn btn-sm" id="compMonBtn" disabled>Monitor</button>
       </div>
@@ -433,7 +440,7 @@ function setupStreamSource(name,kind,stream){
 }
 function setupBufferSource(name,kind,buffer){
   var s=makeBaseSource(name,kind);
-  var src=audioCtx.createBufferSource(); src.buffer=buffer;
+  var src=audioCtx.createBufferSource(); src.buffer=buffer; src.loop=true;
   s.node=src; src.connect(s.inGain); s.inGain.connect(s.phaseGain);
   if(name==='mic') s.inGain.gain.value=micGain;
   src.start();
@@ -1065,6 +1072,11 @@ function wire(){
   document.getElementById('micBtn').addEventListener('click',toggleMic);
   document.getElementById('compBtn').addEventListener('click',toggleComp);
   document.getElementById('instFileInput').addEventListener('change',function(){ if(this.files&&this.files[0]) handleInstFile(this.files[0]); this.value=''; });
+  var dz=document.getElementById('instDrop');
+  dz.addEventListener('click',function(e){ if(e.target.closest('label')||e.target.id==='instFileInput') return; document.getElementById('instFileInput').click(); });
+  dz.addEventListener('dragover',function(e){ e.preventDefault(); this.classList.add('over'); });
+  dz.addEventListener('dragleave',function(){ this.classList.remove('over'); });
+  dz.addEventListener('drop',function(e){ e.preventDefault(); this.classList.remove('over'); if(e.dataTransfer.files&&e.dataTransfer.files[0]) handleInstFile(e.dataTransfer.files[0]); });
   document.getElementById('micMonBtn').addEventListener('click',function(){ toggleMonitor('mic'); });
   document.getElementById('compMonBtn').addEventListener('click',function(){ toggleMonitor('comp'); });
   document.getElementById('micGainFader').addEventListener('input',function(){ setMicGain(this.value); });
