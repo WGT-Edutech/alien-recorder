@@ -217,12 +217,13 @@ button{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-
       <svg class="icon" style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
       <div class="source-name">Computer<span class="status" id="compStatus">inactive</span></div>
       <div class="source-controls">
+        <label class="btn" style="position:relative;overflow:hidden;cursor:pointer">Upload Instrumental<input type="file" id="instFileInput" accept="audio/*,video/*" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
         <button class="btn" id="compBtn">Capture Tab Audio</button>
         <button class="btn btn-sm" id="compMonBtn" disabled>Monitor</button>
       </div>
     </div>
     <div class="source-row" style="border:none">
-      <span class="instruct" style="font-size:1.9rem">For instrumentals: play the video in another tab, click "Capture Tab Audio", then pick that tab in the pop-up.</span>
+      <span class="instruct" style="font-size:1.9rem">For best sync, upload the instrumental file. Or capture a tab: play the video in another tab, click "Capture Tab Audio", then pick that tab in the pop-up.</span>
     </div>
   </section>
 
@@ -429,6 +430,29 @@ function setupStreamSource(name,kind,stream){
   s.stream=stream;
   sources[name]=s;
   return s;
+}
+function setupBufferSource(name,kind,buffer){
+  var s=makeBaseSource(name,kind);
+  var src=audioCtx.createBufferSource(); src.buffer=buffer;
+  s.node=src; src.connect(s.inGain); s.inGain.connect(s.phaseGain);
+  if(name==='mic') s.inGain.gain.value=micGain;
+  src.start();
+  s.stream=null;
+  sources[name]=s;
+  return s;
+}
+function handleInstFile(file){
+  ensureAudio();
+  var reader=new FileReader();
+  reader.onload=function(){
+    audioCtx.decodeAudioData(reader.result,function(buf){
+      if(sourceOf('comp')) releaseSource('comp');
+      setupBufferSource('comp','comp',buf);
+      setStatus('comp','active');
+      renderMixer();
+    },function(e){ console.error('decode fail',e); alert('Could not decode that file.'); });
+  };
+  reader.readAsArrayBuffer(file);
 }
 function sourceOf(name){ return sources[name]||simSources[name]; }
 function activeSources(){
@@ -1040,6 +1064,7 @@ function wire(){
   populateMicDevices();
   document.getElementById('micBtn').addEventListener('click',toggleMic);
   document.getElementById('compBtn').addEventListener('click',toggleComp);
+  document.getElementById('instFileInput').addEventListener('change',function(){ if(this.files&&this.files[0]) handleInstFile(this.files[0]); this.value=''; });
   document.getElementById('micMonBtn').addEventListener('click',function(){ toggleMonitor('mic'); });
   document.getElementById('compMonBtn').addEventListener('click',function(){ toggleMonitor('comp'); });
   document.getElementById('micGainFader').addEventListener('input',function(){ setMicGain(this.value); });
